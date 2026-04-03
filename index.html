@@ -120,12 +120,13 @@ textarea { resize: vertical; min-height: 80px; }
 <div id="errorBox" class="error hidden"></div>
 
 <div id="resultsSection" class="hidden">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <span style="font-weight:600;">Results</span>
+    <button class="btn btn-primary btn-sm" id="compareBtn">Full-Screen Compare</button>
+  </div>
   <div class="results">
     <div><div class="label">Original</div><img id="originalImg" alt="Original"></div>
     <div><div class="label">Edited</div><img id="editedImg" alt="Edited"></div>
-  </div>
-  <div style="text-align:center; margin-bottom:12px;">
-    <button class="btn btn-secondary btn-sm" id="compareBtn">Full-Screen Compare</button>
   </div>
 
   <div class="warning">Before downloading: Compare carefully against the original. Verify no furniture, flowers, landscaping, or objects were added that don't exist at the property.</div>
