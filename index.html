@@ -436,7 +436,8 @@ refineBtn.addEventListener("click", async () => {
       body: JSON.stringify({
         session_id: state.sessionId,
         follow_up_text: followUp,
-        conversation_history: state.conversationHistory,
+        current_image: state.currentResult,
+        current_mime_type: "image/png",
         iteration_number: state.editCount,
         property_name: state.propertyName,
       }),
@@ -449,8 +450,6 @@ refineBtn.addEventListener("click", async () => {
     state.lastSubmissionId = data.submission_id;
     state.editCount++;
     state.totalCost += data.cost_estimate;
-    state.conversationHistory.push({ role: "user", parts: [{ text: followUp }] });
-    state.conversationHistory.push({ role: "model", parts: data.model_parts });
     showResult();
   } catch (err) {
     showError(err.message);

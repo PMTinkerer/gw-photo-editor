@@ -156,11 +156,17 @@ async function handleGenerate(request, env, ctx) {
 }
 
 async function handleIterate(request, env, ctx) {
-  const { session_id, follow_up_text, conversation_history, iteration_number, property_name } = await request.json();
-  if (!session_id || !follow_up_text || !conversation_history) {
-    return { error: "session_id, follow_up_text, and conversation_history required", status: 400 };
+  const { session_id, follow_up_text, current_image, current_mime_type, iteration_number, property_name } = await request.json();
+  if (!session_id || !follow_up_text || !current_image) {
+    return { error: "session_id, follow_up_text, and current_image required", status: 400 };
   }
-  const gemini = await callGemini(env, [...conversation_history, { role: "user", parts: [{ text: follow_up_text }] }]);
+  const gemini = await callGemini(env, [{
+    role: "user",
+    parts: [
+      { inlineData: { mimeType: current_mime_type || "image/png", data: current_image } },
+      { text: follow_up_text },
+    ],
+  }]);
   const id = `sub_${crypto.randomUUID().slice(0, 12)}`;
   const iterNum = (iteration_number || 1) + 1;
   ctx.waitUntil(appendToLog(env, "submissions.jsonl", makeSubLog(id, session_id, property_name || "", iterNum, null, follow_up_text, gemini)));
@@ -250,7 +256,8 @@ export default {
     } catch (err) {
       if (err.status && err.body) {
         console.error("Upstream error:", err.status, err.body);
-        return json({ error: "upstream_error", status: err.status }, 502, cors);
+        const hint = err.status === 429 ? " (rate limited — wait a moment)" : err.status === 400 ? " (bad request — try New Photo)" : "";
+        return json({ error: `upstream_error (${err.status})${hint}` }, 502, cors);
       }
       console.error("Worker error:", err);
       return json({ error: "internal_error" }, 500, cors);
