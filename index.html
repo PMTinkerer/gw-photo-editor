@@ -40,10 +40,18 @@ textarea { resize: vertical; min-height: 80px; }
 .results .label { font-size: 0.8rem; color: #6c757d; margin-bottom: 4px; }
 @media (max-width: 600px) { .results { grid-template-columns: 1fr; } }
 
-/* Zoom modal */
-.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; cursor: pointer; }
+/* Compare modal */
+.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 100; flex-direction: column; }
 .modal.active { display: flex; }
-.modal img { max-width: 95vw; max-height: 95vh; object-fit: contain; }
+.modal-toolbar { display: flex; justify-content: center; gap: 8px; padding: 12px; flex-shrink: 0; }
+.modal-toolbar button { padding: 6px 14px; border: 1px solid #555; border-radius: 4px; background: #333; color: white; cursor: pointer; font-size: 0.85rem; }
+.modal-toolbar button.active { background: #0d6efd; border-color: #0d6efd; }
+.modal-toolbar .close-btn { position: absolute; right: 12px; top: 12px; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 4px 10px; }
+.modal-images { flex: 1; display: flex; justify-content: center; align-items: center; gap: 12px; padding: 8px 16px 16px; overflow: hidden; }
+.modal-images .img-wrap { position: relative; max-height: 100%; display: flex; flex-direction: column; align-items: center; }
+.modal-images .img-wrap img { max-width: 90vw; max-height: calc(100vh - 80px); object-fit: contain; border-radius: 4px; }
+.modal-images.side-by-side .img-wrap img { max-width: 48vw; }
+.modal-images .img-label { color: #aaa; font-size: 0.8rem; margin-bottom: 4px; }
 
 /* Warning banner */
 .warning { background: #fff3cd; border: 1px solid #ffecb5; border-radius: 4px; padding: 10px 14px; font-size: 0.85rem; color: #664d03; margin-bottom: 16px; }
@@ -116,6 +124,9 @@ textarea { resize: vertical; min-height: 80px; }
     <div><div class="label">Original</div><img id="originalImg" alt="Original"></div>
     <div><div class="label">Edited</div><img id="editedImg" alt="Edited"></div>
   </div>
+  <div style="text-align:center; margin-bottom:12px;">
+    <button class="btn btn-secondary btn-sm" id="compareBtn">Full-Screen Compare</button>
+  </div>
 
   <div class="warning">Before downloading: Compare carefully against the original. Verify no furniture, flowers, landscaping, or objects were added that don't exist at the property.</div>
 
@@ -144,7 +155,18 @@ textarea { resize: vertical; min-height: 80px; }
   <div class="cost" id="costTracker"></div>
 </div>
 
-<div class="modal" id="zoomModal"><img id="zoomImg" alt="Zoomed"></div>
+<div class="modal" id="zoomModal">
+  <div class="modal-toolbar">
+    <button id="viewBoth" class="active">Side by Side</button>
+    <button id="viewOriginal">Original</button>
+    <button id="viewEdited">Edited</button>
+    <button class="close-btn" id="closeModal">&times;</button>
+  </div>
+  <div class="modal-images side-by-side" id="modalImages">
+    <div class="img-wrap" id="modalOrigWrap"><div class="img-label">Original</div><img id="modalOrigImg" alt="Original"></div>
+    <div class="img-wrap" id="modalEditWrap"><div class="img-label">Edited</div><img id="modalEditImg" alt="Edited"></div>
+  </div>
+</div>
 
 <script>
 const WORKER_URL = "https://gw-photo-editor-api.gwphoto.workers.dev";
@@ -200,7 +222,7 @@ const generateBtn = $("generateBtn"), errorBox = $("errorBox"), resultsSection =
 const originalImg = $("originalImg"), editedImg = $("editedImg"), followUpText = $("followUpText");
 const refineBtn = $("refineBtn"), iterWarning = $("iterWarning"), scoreSlider = $("scoreSlider");
 const scoreLabel = $("scoreLabel");
-const costTracker = $("costTracker"), zoomModal = $("zoomModal"), zoomImg = $("zoomImg");
+const costTracker = $("costTracker"), zoomModal = $("zoomModal");
 
 // Init
 promptText.value = DEFAULT_PROMPT;
@@ -320,10 +342,34 @@ function showResult() {
   resetFeedback();
 }
 
-// Zoom
-originalImg.addEventListener("click", () => { zoomImg.src = originalImg.src; zoomModal.classList.add("active"); });
-editedImg.addEventListener("click", () => { zoomImg.src = editedImg.src; zoomModal.classList.add("active"); });
-zoomModal.addEventListener("click", () => zoomModal.classList.remove("active"));
+// Compare modal
+const modalImages = $("modalImages"), modalOrigWrap = $("modalOrigWrap"), modalEditWrap = $("modalEditWrap");
+const modalOrigImg = $("modalOrigImg"), modalEditImg = $("modalEditImg");
+
+function openCompare(mode) {
+  modalOrigImg.src = state.originalPreview;
+  modalEditImg.src = `data:image/png;base64,${state.currentResult}`;
+  setCompareMode(mode);
+  zoomModal.classList.add("active");
+}
+
+function setCompareMode(mode) {
+  $("viewBoth").classList.toggle("active", mode === "both");
+  $("viewOriginal").classList.toggle("active", mode === "original");
+  $("viewEdited").classList.toggle("active", mode === "edited");
+  modalImages.className = "modal-images" + (mode === "both" ? " side-by-side" : "");
+  modalOrigWrap.classList.toggle("hidden", mode === "edited");
+  modalEditWrap.classList.toggle("hidden", mode === "original");
+}
+
+$("compareBtn").addEventListener("click", () => openCompare("both"));
+originalImg.addEventListener("click", () => openCompare("original"));
+editedImg.addEventListener("click", () => openCompare("edited"));
+$("viewBoth").addEventListener("click", () => setCompareMode("both"));
+$("viewOriginal").addEventListener("click", () => setCompareMode("original"));
+$("viewEdited").addEventListener("click", () => setCompareMode("edited"));
+$("closeModal").addEventListener("click", () => zoomModal.classList.remove("active"));
+zoomModal.addEventListener("click", (e) => { if (e.target === zoomModal) zoomModal.classList.remove("active"); });
 
 // Score slider
 scoreSlider.addEventListener("input", () => {
