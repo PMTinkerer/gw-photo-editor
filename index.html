@@ -359,8 +359,8 @@ function setCompareMode(mode) {
   $("viewOriginal").classList.toggle("active", mode === "original");
   $("viewEdited").classList.toggle("active", mode === "edited");
   modalImages.className = "modal-images" + (mode === "both" ? " side-by-side" : "");
-  modalOrigWrap.classList.toggle("hidden", mode === "edited");
-  modalEditWrap.classList.toggle("hidden", mode === "original");
+  modalOrigWrap.style.display = mode === "edited" ? "none" : "flex";
+  modalEditWrap.style.display = mode === "original" ? "none" : "flex";
 }
 
 $("compareBtn").addEventListener("click", () => openCompare("both"));

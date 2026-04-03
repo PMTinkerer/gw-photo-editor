@@ -89,19 +89,20 @@ async function appendToLog(env, filePath, entry, retries = 3) {
   }
 }
 
-async function callGemini(env, contents) {
+async function callGemini(env, contents, useGrounding = false) {
   const start = Date.now();
+  const body = {
+    contents,
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"],
+      imageConfig: { aspectRatio: "3:2", imageSize: "2K" },
+    },
+  };
+  if (useGrounding) body.tools = [{ googleSearch: {} }];
   const resp = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents,
-      generationConfig: {
-        responseModalities: ["TEXT", "IMAGE"],
-        imageConfig: { aspectRatio: "3:2", imageSize: "2K" },
-      },
-      tools: [{ googleSearch: {} }],
-    }),
+    body: JSON.stringify(body),
   });
   if (!resp.ok) throw { status: resp.status, body: await resp.text() };
 
@@ -143,7 +144,7 @@ async function handleGenerate(request, env, ctx) {
       { inlineData: { mimeType: image.type || "image/jpeg", data: bufToBase64(await image.arrayBuffer()) } },
       { text: prompt },
     ],
-  }]);
+  }], true);
   const id = `sub_${crypto.randomUUID().slice(0, 12)}`;
   ctx.waitUntil(appendToLog(env, "submissions.jsonl", makeSubLog(id, sessionId, propertyName, 1, prompt, null, gemini)));
   return {
