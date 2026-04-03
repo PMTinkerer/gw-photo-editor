@@ -141,12 +141,14 @@ textarea { resize: vertical; min-height: 80px; }
       <span style="font-size:0.85rem; color:#6c757d;">Rate:</span>
       <input type="range" id="scoreSlider" min="1" max="10" value="5">
       <span class="score-label" id="scoreLabel">5 — Needs work</span>
+      <button class="btn btn-primary btn-sm" id="submitRatingBtn">Submit Rating</button>
     </div>
+    <div id="ratingMsg" class="hidden mt8" style="font-size:0.85rem; color:#198754; font-weight:600;"></div>
     <div id="iterWarning" class="warning hidden">You've reached 4 iterations. For best results, download the current image and start a new session with it.</div>
   </div>
 
   <div class="flex-gap">
-    <button class="btn btn-green" id="downloadBtn">Download Result</button>
+    <button class="btn btn-green" id="downloadBtn" disabled>Download Result</button>
     <button class="btn btn-secondary" id="newPhotoBtn">New Photo</button>
   </div>
   <div class="cost" id="costTracker"></div>
@@ -397,7 +399,19 @@ function resetFeedback() {
   $("otherTextWrap").classList.add("hidden");
   $("otherText").value = "";
   followUpText.value = "";
+  $("ratingMsg").classList.add("hidden");
+  $("downloadBtn").disabled = true;
+  state.ratingSubmitted = false;
 }
+
+$("submitRatingBtn").addEventListener("click", () => {
+  logFeedback(false);
+  state.ratingSubmitted = true;
+  const score = scoreSlider.value;
+  $("ratingMsg").textContent = "Rating submitted (" + score + "/10). You can now download.";
+  $("ratingMsg").classList.remove("hidden");
+  $("downloadBtn").disabled = false;
+});
 
 function logFeedback(willRegen) {
   const issues = getSelectedIssues();
@@ -458,10 +472,9 @@ refineBtn.addEventListener("click", async () => {
   }
 });
 
-// Download — logs feedback then downloads
+// Download
 $("downloadBtn").addEventListener("click", () => {
   if (!state.currentResult) return;
-  logFeedback(false);
   const a = document.createElement("a");
   a.href = `data:image/png;base64,${state.currentResult}`;
   a.download = `${state.propertyName.replace(/[^a-zA-Z0-9]/g, "_")}_summer.png`;
