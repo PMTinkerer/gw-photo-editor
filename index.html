@@ -47,7 +47,19 @@ textarea { resize: vertical; min-height: 80px; }
 .modal-toolbar button { padding: 6px 14px; border: 1px solid #555; border-radius: 4px; background: #333; color: white; cursor: pointer; font-size: 0.85rem; }
 .modal-toolbar button.active { background: #0d6efd; border-color: #0d6efd; }
 .modal-toolbar .close-btn { position: absolute; right: 12px; top: 12px; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 4px 10px; }
-.modal-images { flex: 1; display: flex; justify-content: center; align-items: center; gap: 12px; padding: 8px 16px 16px; overflow: hidden; }
+.modal-images { flex: 1; display: flex; justify-content: center; align-items: center; gap: 12px; padding: 8px 16px 8px; overflow: hidden; }
+.modal-checklist { background: #1a1a1a; border-top: 1px solid #333; padding: 10px 20px; flex-shrink: 0; max-height: 40vh; overflow-y: auto; }
+.modal-checklist h4 { color: #ccc; font-size: 0.85rem; margin-bottom: 8px; }
+.checklist-items { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; }
+@media (max-width: 700px) { .checklist-items { grid-template-columns: 1fr; } }
+.checklist-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.checklist-item span { color: #ddd; font-size: 0.82rem; flex: 1; }
+.check-btns { display: flex; gap: 4px; flex-shrink: 0; }
+.check-btns button { padding: 2px 10px; border: 1px solid #555; border-radius: 3px; background: #333; color: #ccc; cursor: pointer; font-size: 0.75rem; }
+.check-btns button.pass { background: #198754; border-color: #198754; color: white; }
+.check-btns button.fail { background: #dc3545; border-color: #dc3545; color: white; }
+.checklist-status { margin-top: 8px; display: flex; align-items: center; gap: 12px; }
+.checklist-status .msg { font-size: 0.82rem; }
 
 /* Warning banner */
 .warning { background: #fff3cd; border: 1px solid #ffecb5; border-radius: 4px; padding: 10px 14px; font-size: 0.85rem; color: #664d03; margin-bottom: 16px; }
@@ -141,7 +153,7 @@ textarea { resize: vertical; min-height: 80px; }
       <span style="font-size:0.85rem; color:#6c757d;">Rate:</span>
       <input type="range" id="scoreSlider" min="1" max="10" value="5">
       <span class="score-label" id="scoreLabel">5 — Needs work</span>
-      <button class="btn btn-primary btn-sm" id="submitRatingBtn">Submit Rating</button>
+      <button class="btn btn-primary btn-sm" id="submitRatingBtn" disabled>Submit Rating</button>
     </div>
     <div id="ratingMsg" class="hidden mt8" style="font-size:0.85rem; color:#198754; font-weight:600;"></div>
     <div id="iterWarning" class="warning hidden">You've reached 4 iterations. For best results, download the current image and start a new session with it.</div>
@@ -162,6 +174,14 @@ textarea { resize: vertical; min-height: 80px; }
     <button class="close-btn" id="closeModal">&times;</button>
   </div>
   <div class="modal-images" id="modalImages"></div>
+  <div class="modal-checklist" id="modalChecklist">
+    <h4>Verification Checklist — answer all before downloading</h4>
+    <div class="checklist-items" id="checklistItems"></div>
+    <div class="checklist-status">
+      <span class="msg" id="checklistMsg" style="color:#999;">Answer all items to continue</span>
+      <button class="btn btn-sm" id="checklistDoneBtn" disabled style="background:#198754;color:white;margin-left:auto;">Approve &amp; Close</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -343,8 +363,19 @@ function showResult() {
   resetFeedback();
 }
 
-// Compare modal
+// Compare modal + verification checklist
 let compareMode = "both";
+
+const CHECKLIST_ITEMS = [
+  { id: "ck_trees", text: "No new trees added — every tree in the edited photo has a matching trunk in the original" },
+  { id: "ck_shrubs", text: "No new shrubs, bushes, or hedges added that weren't in the original" },
+  { id: "ck_flowers", text: "No flowers, planters, or landscaping added that didn't already exist" },
+  { id: "ck_building", text: "Building is unchanged — same structure, paint color, siding, roof, and windows" },
+  { id: "ck_objects", text: "No furniture, decor, vehicles, people, or other objects added" },
+  { id: "ck_lighting", text: "Lighting and sky look natural — no unrealistic glow or colors" },
+  { id: "ck_artifacts", text: "No visible AI artifacts, distortion, or warping" },
+];
+const checklistState = {};
 
 function openCompare(mode) {
   compareMode = mode;
@@ -358,15 +389,13 @@ function renderModal() {
   const editSrc = `data:image/png;base64,${state.currentResult}`;
   const isSideBySide = compareMode === "both";
 
-  // Update toolbar buttons
   $("viewBoth").classList.toggle("active", compareMode === "both");
   $("viewOriginal").classList.toggle("active", compareMode === "original");
   $("viewEdited").classList.toggle("active", compareMode === "edited");
 
-  // Rebuild images
   let html = "";
   const maxW = isSideBySide ? "max-width:48vw;" : "max-width:90vw;";
-  const imgStyle = `${maxW} max-height:calc(100vh - 80px); object-fit:contain; border-radius:4px;`;
+  const imgStyle = `${maxW} max-height:calc(100vh - 220px); object-fit:contain; border-radius:4px;`;
   if (compareMode !== "edited") {
     html += `<div style="text-align:center;"><div style="color:#aaa;font-size:0.8rem;margin-bottom:4px;">Original</div><img src="${origSrc}" style="${imgStyle}" alt="Original"></div>`;
   }
@@ -376,6 +405,68 @@ function renderModal() {
   container.innerHTML = html;
 }
 
+function buildChecklist() {
+  const container = $("checklistItems");
+  container.innerHTML = CHECKLIST_ITEMS.map((item) => {
+    const val = checklistState[item.id];
+    const passActive = val === "pass" ? " pass" : "";
+    const failActive = val === "fail" ? " fail" : "";
+    return `<div class="checklist-item">
+      <span>${item.text}</span>
+      <div class="check-btns">
+        <button data-id="${item.id}" data-val="pass" class="${passActive}">OK</button>
+        <button data-id="${item.id}" data-val="fail" class="${failActive}">Issue</button>
+      </div>
+    </div>`;
+  }).join("");
+  updateChecklistStatus();
+}
+
+function updateChecklistStatus() {
+  const total = CHECKLIST_ITEMS.length;
+  const answered = CHECKLIST_ITEMS.filter((i) => checklistState[i.id]).length;
+  const issues = CHECKLIST_ITEMS.filter((i) => checklistState[i.id] === "fail").length;
+  const msg = $("checklistMsg");
+  const doneBtn = $("checklistDoneBtn");
+
+  if (answered < total) {
+    msg.textContent = `${answered}/${total} checked — answer all to continue`;
+    msg.style.color = "#999";
+    doneBtn.disabled = true;
+  } else if (issues > 0) {
+    msg.textContent = `${issues} issue${issues > 1 ? "s" : ""} found — use Refine to fix, or approve anyway`;
+    msg.style.color = "#ffc107";
+    doneBtn.disabled = false;
+    doneBtn.textContent = "Approve Anyway & Close";
+    doneBtn.style.background = "#e67e22";
+  } else {
+    msg.textContent = "All checks passed!";
+    msg.style.color = "#198754";
+    doneBtn.disabled = false;
+    doneBtn.textContent = "Approve & Close";
+    doneBtn.style.background = "#198754";
+  }
+}
+
+function resetChecklist() {
+  CHECKLIST_ITEMS.forEach((i) => delete checklistState[i.id]);
+  state.checklistApproved = false;
+  buildChecklist();
+}
+
+$("checklistItems").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-id]");
+  if (!btn) return;
+  checklistState[btn.dataset.id] = btn.dataset.val;
+  buildChecklist();
+});
+
+$("checklistDoneBtn").addEventListener("click", () => {
+  state.checklistApproved = true;
+  $("submitRatingBtn").disabled = false;
+  zoomModal.classList.remove("active");
+});
+
 $("compareBtn").addEventListener("click", () => openCompare("both"));
 originalImg.addEventListener("click", () => openCompare("original"));
 editedImg.addEventListener("click", () => openCompare("edited"));
@@ -384,6 +475,8 @@ $("viewOriginal").addEventListener("click", () => { compareMode = "original"; re
 $("viewEdited").addEventListener("click", () => { compareMode = "edited"; renderModal(); });
 $("closeModal").addEventListener("click", () => zoomModal.classList.remove("active"));
 zoomModal.addEventListener("click", (e) => { if (e.target === zoomModal || e.target === $("modalImages")) zoomModal.classList.remove("active"); });
+
+buildChecklist();
 
 // Score slider
 scoreSlider.addEventListener("input", () => {
@@ -406,7 +499,9 @@ function resetFeedback() {
   followUpText.value = "";
   $("ratingMsg").classList.add("hidden");
   $("downloadBtn").disabled = true;
+  $("submitRatingBtn").disabled = true;
   state.ratingSubmitted = false;
+  resetChecklist();
 }
 
 $("submitRatingBtn").addEventListener("click", () => {
