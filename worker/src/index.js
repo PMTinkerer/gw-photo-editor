@@ -3,9 +3,11 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 const COST_PER_IMAGE = 0.134;
 const ALLOWED_ORIGIN = "https://PMTinkerer.github.io";
 
-function corsHeaders(request) {
+function corsHeaders(request, env) {
   const origin = request.headers.get("Origin") || "";
-  if (origin !== ALLOWED_ORIGIN && !origin.startsWith("http://localhost")) return null;
+  const allowed = [ALLOWED_ORIGIN];
+  if (env?.ENVIRONMENT === "development") allowed.push("http://localhost:8787");
+  if (!allowed.includes(origin)) return null;
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -51,7 +53,13 @@ async function readRawFile(env, path) {
 
 async function readJsonl(env, path) {
   const raw = await readRawFile(env, path);
-  return raw.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return raw.split("\n").filter(Boolean).map((l) => {
+    try { return JSON.parse(l); } catch { return null; }
+  }).filter(Boolean);
+}
+
+function utf8ToBase64(str) {
+  return btoa(unescape(encodeURIComponent(str)));
 }
 
 async function appendToLog(env, filePath, entry, retries = 3) {
@@ -60,18 +68,18 @@ async function appendToLog(env, filePath, entry, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
       const get = await fetch(url, { headers: hdrs });
-      if (!get.ok) throw new Error(`GET ${filePath}: ${get.status}`);
-      const file = await get.json();
-      const existing = file.content ? atob(file.content.replace(/\n/g, "")) : "";
-      const put = await fetch(url, {
-        method: "PUT",
-        headers: hdrs,
-        body: JSON.stringify({
-          message: `Log: ${filePath}`,
-          content: btoa(existing + JSON.stringify(entry) + "\n"),
-          sha: file.sha,
-        }),
-      });
+      let existing = "";
+      let sha;
+      if (get.ok) {
+        const file = await get.json();
+        existing = file.content ? decodeURIComponent(escape(atob(file.content.replace(/\n/g, "")))) : "";
+        sha = file.sha;
+      } else if (get.status !== 404) {
+        throw new Error(`GET ${filePath}: ${get.status}`);
+      }
+      const body = { message: `Log: ${filePath}`, content: utf8ToBase64(existing + JSON.stringify(entry) + "\n") };
+      if (sha) body.sha = sha;
+      const put = await fetch(url, { method: "PUT", headers: hdrs, body: JSON.stringify(body) });
       if (put.ok) return;
       if (put.status === 409 && i < retries - 1) continue;
       throw new Error(`PUT ${filePath}: ${put.status}`);
@@ -108,6 +116,7 @@ async function callGemini(env, contents) {
     if (p.inlineData) { resultImageBase64 = p.inlineData.data; modelParts.push({ inlineData: p.inlineData }); }
     if (p.thoughtSignature) modelParts.push({ thoughtSignature: p.thoughtSignature });
   }
+  if (!resultImageBase64) throw { status: 502, body: "Gemini did not return an image. " + responseText };
   return { responseText, resultImageBase64, modelParts, durationMs: Date.now() - start };
 }
 
@@ -168,7 +177,7 @@ async function handleFeedback(request, env, ctx) {
   const id = `fb_${crypto.randomUUID().slice(0, 12)}`;
   ctx.waitUntil(appendToLog(env, "feedback.jsonl", {
     id, submission_id, session_id, created_at: new Date().toISOString(),
-    score: score || null, feedback_text: feedback_text || "",
+    score: score ?? null, feedback_text: feedback_text || "",
     issues_detected: issues_detected || [], resubmitted: will_resubmit || false,
   }));
   return { data: { feedback_id: id }, status: 200 };
@@ -193,9 +202,6 @@ async function handleDashboard(env) {
   const recent = Object.values(sessMap).sort((a, b) => b.first_date.localeCompare(a.first_date)).slice(0, 20);
   recent.forEach((s) => { s.avg_score = s._scores.length ? +(s._scores.reduce((a, b) => a + b, 0) / s._scores.length).toFixed(1) : null; delete s._scores; });
 
-  let promptVersions = [];
-  try { promptVersions = JSON.parse(await readRawFile(env, "prompt_versions.json") || "[]"); } catch {}
-
   return {
     data: {
       total_sessions: new Set(subs.map((s) => s.session_id)).size,
@@ -204,7 +210,7 @@ async function handleDashboard(env) {
       avg_score: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 10) / 10 : null,
       submissions_today: subs.filter((s) => s.created_at?.startsWith(today)).length,
       score_distribution: scoreDist, common_issues: Object.entries(issueCounts).sort((a, b) => b[1] - a[1]).map(([issue, count]) => ({ issue, count })),
-      recent_sessions: recent, prompt_versions: promptVersions,
+      recent_sessions: recent,
     },
     status: 200,
   };
@@ -217,7 +223,7 @@ async function handleExport(env) {
 
 export default {
   async fetch(request, env, ctx) {
-    const cors = corsHeaders(request);
+    const cors = corsHeaders(request, env);
     if (!cors) return new Response("Forbidden", { status: 403 });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
@@ -241,9 +247,12 @@ export default {
       if (result.error) return json({ error: result.error }, result.status, cors);
       return json(result.data, result.status, cors);
     } catch (err) {
-      if (err.status && err.body) return json({ error: "upstream_error", status: err.status, detail: err.body }, 502, cors);
+      if (err.status && err.body) {
+        console.error("Upstream error:", err.status, err.body);
+        return json({ error: "upstream_error", status: err.status }, 502, cors);
+      }
       console.error("Worker error:", err);
-      return json({ error: "internal_error", message: err.message }, 500, cors);
+      return json({ error: "internal_error" }, 500, cors);
     }
   },
 };

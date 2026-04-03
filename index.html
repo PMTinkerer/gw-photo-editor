@@ -199,7 +199,7 @@ const SCORE_LABELS = { 1: "Unusable", 2: "Unusable", 3: "Major issues", 4: "Majo
 const state = {
   sessionId: null, propertyName: "", originalImage: null, originalPreview: null,
   conversationHistory: [], currentResult: null, responseText: "",
-  editCount: 0, totalCost: 0, submissions: [], lastSubmissionId: null,
+  editCount: 0, totalCost: 0, lastSubmissionId: null,
 };
 
 // DOM refs
@@ -300,7 +300,6 @@ generateBtn.addEventListener("click", async () => {
     state.lastSubmissionId = data.submission_id;
     state.editCount++;
     state.totalCost += data.cost_estimate;
-    state.submissions.push(data.submission_id);
 
     // Build conversation history with model parts (includes thought signatures)
     state.conversationHistory = [
@@ -326,7 +325,7 @@ function showResult() {
   originalImg.src = state.originalPreview;
   editedImg.src = `data:image/png;base64,${state.currentResult}`;
   resultsSection.classList.remove("hidden");
-  iterWarning.classList.toggle("hidden", state.editCount < 4);
+  iterWarning.classList.toggle("hidden", state.editCount < 5);
   updateCost();
   resetFeedback();
 }
@@ -363,7 +362,6 @@ refineBtn.addEventListener("click", async () => {
     state.lastSubmissionId = data.submission_id;
     state.editCount++;
     state.totalCost += data.cost_estimate;
-    state.submissions.push(data.submission_id);
 
     // Append to conversation history
     state.conversationHistory.push({ role: "user", parts: [{ text }] });
@@ -436,10 +434,11 @@ $("submitFeedbackBtn").addEventListener("click", async () => {
 });
 
 $("submitRegenBtn").addEventListener("click", async () => {
+  const issues = getSelectedIssues();
+  const issueLabels = issues.map((id) => ISSUE_CATEGORIES.find((c) => c.id === id)?.label).filter(Boolean);
   const fullText = await submitFeedback(true);
   if (fullText === null) return;
-  // Use feedback as follow-up prompt
-  const followUp = fullText || feedbackText.value.trim() || "Please fix the issues I noted";
+  const followUp = fullText || (issueLabels.length ? "Fix these issues: " + issueLabels.join(", ") : "Please fix the issues I noted");
   followUpText.value = followUp;
   refineBtn.click();
 });
@@ -458,7 +457,7 @@ $("newPhotoBtn").addEventListener("click", () => {
   Object.assign(state, {
     sessionId: null, propertyName: "", originalImage: null, originalPreview: null,
     conversationHistory: [], currentResult: null, responseText: "",
-    editCount: 0, totalCost: 0, submissions: [], lastSubmissionId: null,
+    editCount: 0, totalCost: 0, lastSubmissionId: null,
   });
   propertyNameEl.value = "";
   uploadPreview.classList.add("hidden");

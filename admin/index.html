@@ -52,9 +52,6 @@ th { background: #f1f3f5; font-weight: 600; }
   <h2>Recent Sessions</h2>
   <table id="sessionsTable"><thead><tr><th>Property</th><th>Date</th><th>Edits</th><th>Avg Score</th><th>Cost</th></tr></thead><tbody></tbody></table>
 
-  <h2>Prompt Versions</h2>
-  <table id="promptsTable"><thead><tr><th>Version</th><th>Active</th><th>Uses</th><th>Avg Score</th><th>Notes</th></tr></thead><tbody></tbody></table>
-
   <h2>Export</h2>
   <button class="btn btn-green" id="exportBtn">Download Raw Data (JSONL)</button>
 </div>
@@ -64,6 +61,7 @@ const WORKER_URL = "https://gw-photo-editor-api.PMTinkerer.workers.dev";
 let token = sessionStorage.getItem("admin_token") || "";
 
 const $ = (id) => document.getElementById(id);
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
 
 if (token) loadDashboard();
 
@@ -99,7 +97,6 @@ async function loadDashboard() {
     renderScoreChart(data.score_distribution);
     renderIssues(data.common_issues);
     renderSessions(data.recent_sessions);
-    renderPrompts(data.prompt_versions);
   } catch (err) {
     if (err.message !== "Unauthorized") {
       $("loginError").textContent = err.message;
@@ -132,22 +129,15 @@ function renderScoreChart(dist) {
 function renderIssues(issues) {
   const tbody = $("issuesTable").querySelector("tbody");
   tbody.innerHTML = issues.length
-    ? issues.map((i) => `<tr><td>${i.issue}</td><td>${i.count}</td></tr>`).join("")
+    ? issues.map((i) => `<tr><td>${esc(i.issue)}</td><td>${i.count}</td></tr>`).join("")
     : "<tr><td colspan='2'>No issues reported yet</td></tr>";
 }
 
 function renderSessions(sessions) {
   const tbody = $("sessionsTable").querySelector("tbody");
   tbody.innerHTML = sessions.length
-    ? sessions.map((s) => `<tr><td>${s.property_name}</td><td>${s.first_date?.slice(0, 10) || "—"}</td><td>${s.iterations}</td><td>${s.avg_score ?? "—"}</td><td>$${(s.cost || 0).toFixed(2)}</td></tr>`).join("")
+    ? sessions.map((s) => `<tr><td>${esc(s.property_name)}</td><td>${esc(s.first_date?.slice(0, 10) || "—")}</td><td>${s.iterations}</td><td>${s.avg_score ?? "—"}</td><td>$${(s.cost || 0).toFixed(2)}</td></tr>`).join("")
     : "<tr><td colspan='5'>No sessions yet</td></tr>";
-}
-
-function renderPrompts(versions) {
-  const tbody = $("promptsTable").querySelector("tbody");
-  tbody.innerHTML = versions.length
-    ? versions.map((v) => `<tr><td>v${v.version}</td><td>${v.is_active ? "✓" : ""}</td><td>${v.total_uses}</td><td>${v.avg_score ?? "—"}</td><td>${v.change_notes || ""}</td></tr>`).join("")
-    : "<tr><td colspan='5'>No prompt versions</td></tr>";
 }
 
 $("exportBtn").addEventListener("click", async () => {
