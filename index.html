@@ -119,32 +119,22 @@ textarea { resize: vertical; min-height: 80px; }
 
   <div class="warning">Before downloading: Compare carefully against the original. Verify no furniture, flowers, landscaping, or objects were added that don't exist at the property.</div>
 
-  <div id="iterateSection">
-    <div class="iterate-row">
-      <input type="text" id="followUpText" placeholder="Describe what to fix, e.g. 'The grass near the deck still looks brown'">
+  <div id="feedbackPanel" class="feedback">
+    <h3>Need changes?</h3>
+    <div class="iterate-row mb8">
+      <input type="text" id="followUpText" placeholder="What needs fixing? e.g. 'The grass near the deck still looks brown'">
       <button class="btn btn-primary btn-sm" id="refineBtn">Refine</button>
     </div>
-    <div id="iterWarning" class="warning hidden">You've reached 4 iterations. For best results, download the current image and start a new session with it.</div>
-  </div>
-
-  <div id="feedbackPanel" class="feedback">
-    <h3>How does this look?</h3>
-    <div class="score-row">
-      <input type="range" id="scoreSlider" min="1" max="10" value="5">
-      <span class="score-label" id="scoreLabel">5 — Needs work</span>
-    </div>
-    <label style="font-weight:600; margin-bottom:6px;">Issues found:</label>
-    <div class="checkbox-grid" id="issueChecks"></div>
+    <div class="checkbox-grid mb8" id="issueChecks"></div>
     <div id="otherTextWrap" class="hidden mb8">
       <input type="text" id="otherText" placeholder="Describe the issue...">
     </div>
-    <label for="feedbackText" class="mb8">What specifically was missed or wrong?</label>
-    <textarea id="feedbackText" rows="2" class="mb8"></textarea>
-    <div class="feedback-actions">
-      <button class="btn btn-secondary btn-sm" id="submitFeedbackBtn">Submit Feedback</button>
-      <button class="btn btn-primary btn-sm" id="submitRegenBtn">Submit &amp; Regenerate</button>
+    <div class="score-row">
+      <span style="font-size:0.85rem; color:#6c757d;">Rate:</span>
+      <input type="range" id="scoreSlider" min="1" max="10" value="5">
+      <span class="score-label" id="scoreLabel">5 — Needs work</span>
     </div>
-    <div id="feedbackMsg" class="hidden mt8" style="font-size:0.85rem; color:#198754;"></div>
+    <div id="iterWarning" class="warning hidden">You've reached 4 iterations. For best results, download the current image and start a new session with it.</div>
   </div>
 
   <div class="flex-gap">
@@ -209,7 +199,7 @@ const uploadPreview = $("uploadPreview"), uploadText = $("uploadText"), promptTe
 const generateBtn = $("generateBtn"), errorBox = $("errorBox"), resultsSection = $("resultsSection");
 const originalImg = $("originalImg"), editedImg = $("editedImg"), followUpText = $("followUpText");
 const refineBtn = $("refineBtn"), iterWarning = $("iterWarning"), scoreSlider = $("scoreSlider");
-const scoreLabel = $("scoreLabel"), feedbackText = $("feedbackText"), feedbackMsg = $("feedbackMsg");
+const scoreLabel = $("scoreLabel");
 const costTracker = $("costTracker"), zoomModal = $("zoomModal"), zoomImg = $("zoomImg");
 
 // Init
@@ -335,47 +325,6 @@ originalImg.addEventListener("click", () => { zoomImg.src = originalImg.src; zoo
 editedImg.addEventListener("click", () => { zoomImg.src = editedImg.src; zoomModal.classList.add("active"); });
 zoomModal.addEventListener("click", () => zoomModal.classList.remove("active"));
 
-// Refine (iterate)
-refineBtn.addEventListener("click", async () => {
-  const text = followUpText.value.trim();
-  if (!text) return;
-  hideError();
-  setLoading(refineBtn, true, "Refining...");
-
-  try {
-    const resp = await fetch(`${WORKER_URL}/api/iterate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: state.sessionId,
-        follow_up_text: text,
-        conversation_history: state.conversationHistory,
-        iteration_number: state.editCount,
-        property_name: state.propertyName,
-      }),
-    });
-    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || `Error ${resp.status}`); }
-    const data = await resp.json();
-
-    state.currentResult = data.result_image_base64;
-    state.responseText = data.response_text;
-    state.lastSubmissionId = data.submission_id;
-    state.editCount++;
-    state.totalCost += data.cost_estimate;
-
-    // Append to conversation history
-    state.conversationHistory.push({ role: "user", parts: [{ text }] });
-    state.conversationHistory.push({ role: "model", parts: data.model_parts });
-
-    followUpText.value = "";
-    showResult();
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    setLoading(refineBtn, false, "Refine");
-  }
-});
-
 // Score slider
 scoreSlider.addEventListener("input", () => {
   const v = parseInt(scoreSlider.value);
@@ -394,58 +343,73 @@ function resetFeedback() {
   $("issueChecks").querySelectorAll("input").forEach((c) => c.checked = false);
   $("otherTextWrap").classList.add("hidden");
   $("otherText").value = "";
-  feedbackText.value = "";
-  feedbackMsg.classList.add("hidden");
+  followUpText.value = "";
 }
 
-async function submitFeedback(willRegen) {
+function logFeedback(willRegen) {
   const issues = getSelectedIssues();
-  const fbText = feedbackText.value.trim();
   const otherText = $("otherText").value.trim();
+  const fbText = followUpText.value.trim();
   const fullText = [fbText, otherText].filter(Boolean).join(". ");
+  fetch(`${WORKER_URL}/api/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      submission_id: state.lastSubmissionId,
+      session_id: state.sessionId,
+      score: parseInt(scoreSlider.value),
+      feedback_text: fullText,
+      issues_detected: issues,
+      will_resubmit: willRegen,
+    }),
+  }).catch(() => {});
+}
+
+// Refine — logs feedback then generates new image
+refineBtn.addEventListener("click", async () => {
+  const typedText = followUpText.value.trim();
+  const issues = getSelectedIssues();
+  const issueLabels = issues.map((id) => ISSUE_CATEGORIES.find((c) => c.id === id)?.label).filter(Boolean);
+  const followUp = typedText || (issueLabels.length ? "Fix these issues: " + issueLabels.join(", ") : "");
+  if (!followUp) return;
+  hideError();
+  logFeedback(true);
+  setLoading(refineBtn, true, "Refining...");
 
   try {
-    const resp = await fetch(`${WORKER_URL}/api/feedback`, {
+    const resp = await fetch(`${WORKER_URL}/api/iterate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        submission_id: state.lastSubmissionId,
         session_id: state.sessionId,
-        score: parseInt(scoreSlider.value),
-        feedback_text: fullText,
-        issues_detected: issues,
-        will_resubmit: willRegen,
+        follow_up_text: followUp,
+        conversation_history: state.conversationHistory,
+        iteration_number: state.editCount,
+        property_name: state.propertyName,
       }),
     });
-    if (!resp.ok) throw new Error("Failed to submit feedback");
-    return fullText;
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || `Error ${resp.status}`); }
+    const data = await resp.json();
+
+    state.currentResult = data.result_image_base64;
+    state.responseText = data.response_text;
+    state.lastSubmissionId = data.submission_id;
+    state.editCount++;
+    state.totalCost += data.cost_estimate;
+    state.conversationHistory.push({ role: "user", parts: [{ text: followUp }] });
+    state.conversationHistory.push({ role: "model", parts: data.model_parts });
+    showResult();
   } catch (err) {
-    showError("Failed to submit feedback: " + err.message);
-    return null;
-  }
-}
-
-$("submitFeedbackBtn").addEventListener("click", async () => {
-  const result = await submitFeedback(false);
-  if (result !== null) {
-    feedbackMsg.textContent = "Feedback submitted. Thank you!";
-    feedbackMsg.classList.remove("hidden");
+    showError(err.message);
+  } finally {
+    setLoading(refineBtn, false, "Refine");
   }
 });
 
-$("submitRegenBtn").addEventListener("click", async () => {
-  const issues = getSelectedIssues();
-  const issueLabels = issues.map((id) => ISSUE_CATEGORIES.find((c) => c.id === id)?.label).filter(Boolean);
-  const fullText = await submitFeedback(true);
-  if (fullText === null) return;
-  const followUp = fullText || (issueLabels.length ? "Fix these issues: " + issueLabels.join(", ") : "Please fix the issues I noted");
-  followUpText.value = followUp;
-  refineBtn.click();
-});
-
-// Download
+// Download — logs feedback then downloads
 $("downloadBtn").addEventListener("click", () => {
   if (!state.currentResult) return;
+  logFeedback(false);
   const a = document.createElement("a");
   a.href = `data:image/png;base64,${state.currentResult}`;
   a.download = `${state.propertyName.replace(/[^a-zA-Z0-9]/g, "_")}_summer.png`;
