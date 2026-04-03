@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Cloudflare
+.wrangler/
+
+# Local secrets
+.dev.vars
+
+# OS
+.DS_Store
+
+# Editor
+*.swp
+*.swo

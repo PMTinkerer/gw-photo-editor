@@ -1,0 +1,6 @@
+name = "gw-photo-editor-api"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+GITHUB_LOGS_REPO = "PMTinkerer/gw-photo-editor-logs"
