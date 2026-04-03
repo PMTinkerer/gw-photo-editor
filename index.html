@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GW Listing Photo Editor</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8f9fa; color: #212529; line-height: 1.5; padding: 16px; max-width: 960px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-bottom: 2px; }
+.subtitle { color: #6c757d; font-size: 0.85rem; margin-bottom: 20px; }
+label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; }
+input[type="text"], textarea { width: 100%; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.9rem; font-family: inherit; }
+textarea { resize: vertical; min-height: 80px; }
+.section { margin-bottom: 20px; }
+.btn { padding: 10px 20px; border: none; border-radius: 4px; font-size: 0.95rem; cursor: pointer; font-weight: 600; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: #0d6efd; color: white; }
+.btn-primary:hover:not(:disabled) { background: #0b5ed7; }
+.btn-green { background: #198754; color: white; }
+.btn-green:hover:not(:disabled) { background: #157347; }
+.btn-secondary { background: #6c757d; color: white; }
+.btn-secondary:hover:not(:disabled) { background: #5c636a; }
+.btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+
+/* Upload zone */
+.upload-zone { border: 2px dashed #ced4da; border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; transition: border-color 0.2s; background: white; }
+.upload-zone:hover, .upload-zone.dragover { border-color: #0d6efd; background: #f0f7ff; }
+.upload-zone img { max-width: 200px; max-height: 150px; margin-top: 10px; border-radius: 4px; }
+
+/* Prompt section */
+.prompt-toggle { cursor: pointer; color: #0d6efd; font-size: 0.85rem; margin-bottom: 6px; user-select: none; }
+.prompt-section.collapsed textarea { display: none; }
+.reset-link { font-size: 0.8rem; color: #6c757d; cursor: pointer; margin-left: 8px; }
+.reset-link:hover { color: #0d6efd; }
+
+/* Results */
+.results { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.results img { width: 100%; border-radius: 4px; cursor: pointer; }
+.results .label { font-size: 0.8rem; color: #6c757d; margin-bottom: 4px; }
+@media (max-width: 600px) { .results { grid-template-columns: 1fr; } }
+
+/* Zoom modal */
+.modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; cursor: pointer; }
+.modal.active { display: flex; }
+.modal img { max-width: 95vw; max-height: 95vh; object-fit: contain; }
+
+/* Warning banner */
+.warning { background: #fff3cd; border: 1px solid #ffecb5; border-radius: 4px; padding: 10px 14px; font-size: 0.85rem; color: #664d03; margin-bottom: 16px; }
+
+/* Feedback panel */
+.feedback { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.feedback h3 { font-size: 1rem; margin-bottom: 12px; }
+.score-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.score-row input[type="range"] { flex: 1; }
+.score-label { font-weight: 600; min-width: 140px; font-size: 0.85rem; }
+.checkbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-bottom: 12px; }
+@media (max-width: 600px) { .checkbox-grid { grid-template-columns: 1fr; } }
+.checkbox-grid label { font-weight: normal; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; }
+.feedback-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Iteration */
+.iterate-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.iterate-row input { flex: 1; }
+
+/* Cost tracker */
+.cost { font-size: 0.8rem; color: #6c757d; text-align: right; margin-top: 8px; }
+
+/* Spinner */
+.spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Error */
+.error { background: #f8d7da; border: 1px solid #f5c2c7; border-radius: 4px; padding: 10px; color: #842029; font-size: 0.85rem; margin-bottom: 12px; }
+
+.hidden { display: none; }
+.mt8 { margin-top: 8px; }
+.mb8 { margin-bottom: 8px; }
+.flex-gap { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<h1>GW Listing Photo Editor</h1>
+<p class="subtitle">Powered by Nano Banana Pro</p>
+
+<div class="section">
+  <label for="propertyName">Property Name</label>
+  <input type="text" id="propertyName" placeholder="e.g. 14 Beach Ave, Wells">
+</div>
+
+<div class="section">
+  <div class="upload-zone" id="uploadZone">
+    <div id="uploadText">Drag & drop a photo here, or click to upload</div>
+    <img id="uploadPreview" class="hidden" alt="Preview">
+  </div>
+  <input type="file" id="fileInput" accept="image/*" class="hidden">
+</div>
+
+<div class="section">
+  <div class="prompt-toggle" id="promptToggle">&#9660; Edit Prompt</div>
+  <div id="promptSection" class="prompt-section">
+    <textarea id="promptText" rows="6"></textarea>
+    <span class="reset-link" id="resetPrompt">Reset to default</span>
+  </div>
+</div>
+
+<div class="section">
+  <button class="btn btn-primary" id="generateBtn" disabled>Generate</button>
+</div>
+
+<div id="errorBox" class="error hidden"></div>
+
+<div id="resultsSection" class="hidden">
+  <div class="results">
+    <div><div class="label">Original</div><img id="originalImg" alt="Original"></div>
+    <div><div class="label">Edited</div><img id="editedImg" alt="Edited"></div>
+  </div>
+
+  <div class="warning">Before downloading: Compare carefully against the original. Verify no furniture, flowers, landscaping, or objects were added that don't exist at the property.</div>
+
+  <div id="iterateSection">
+    <div class="iterate-row">
+      <input type="text" id="followUpText" placeholder="Describe what to fix, e.g. 'The grass near the deck still looks brown'">
+      <button class="btn btn-primary btn-sm" id="refineBtn">Refine</button>
+    </div>
+    <div id="iterWarning" class="warning hidden">You've reached 4 iterations. For best results, download the current image and start a new session with it.</div>
+  </div>
+
+  <div id="feedbackPanel" class="feedback">
+    <h3>How does this look?</h3>
+    <div class="score-row">
+      <input type="range" id="scoreSlider" min="1" max="10" value="5">
+      <span class="score-label" id="scoreLabel">5 — Needs work</span>
+    </div>
+    <label style="font-weight:600; margin-bottom:6px;">Issues found:</label>
+    <div class="checkbox-grid" id="issueChecks"></div>
+    <div id="otherTextWrap" class="hidden mb8">
+      <input type="text" id="otherText" placeholder="Describe the issue...">
+    </div>
+    <label for="feedbackText" class="mb8">What specifically was missed or wrong?</label>
+    <textarea id="feedbackText" rows="2" class="mb8"></textarea>
+    <div class="feedback-actions">
+      <button class="btn btn-secondary btn-sm" id="submitFeedbackBtn">Submit Feedback</button>
+      <button class="btn btn-primary btn-sm" id="submitRegenBtn">Submit &amp; Regenerate</button>
+    </div>
+    <div id="feedbackMsg" class="hidden mt8" style="font-size:0.85rem; color:#198754;"></div>
+  </div>
+
+  <div class="flex-gap">
+    <button class="btn btn-green" id="downloadBtn">Download Result</button>
+    <button class="btn btn-secondary" id="newPhotoBtn">New Photo</button>
+  </div>
+  <div class="cost" id="costTracker"></div>
+</div>
+
+<div class="modal" id="zoomModal"><img id="zoomImg" alt="Zoomed"></div>
+
+<script>
+const WORKER_URL = "https://gw-photo-editor-api.PMTinkerer.workers.dev";
+
+const DEFAULT_PROMPT = `This is a vacation rental listing photo taken in Southern Coastal Maine. Transform it to look like it was photographed in mid-June in this same region.
+
+SEASONAL CHANGES ONLY — apply these transformations to elements ALREADY VISIBLE in the photo:
+- Bare/dormant trees → full green canopy with species typical to coastal Maine (oaks, maples, birches, white pines)
+- Brown/dead/snow-covered grass → healthy green lawn
+- Snow on surfaces → remove it, show the surface underneath as it would naturally appear
+- Overcast winter light → warm, natural New England summer daylight
+- Bare garden beds that are CLEARLY ALREADY PRESENT → green them up with low ground cover only
+
+CRITICAL — DO NOT ADD, GENERATE, OR INVENT ANY OF THE FOLLOWING:
+- Do NOT add flowers, flower beds, planters, or landscaping that is not already present
+- Do NOT add furniture, decor, rugs, cushions, or staging items
+- Do NOT add people, pets, boats, vehicles, or any objects
+- Do NOT add water features, fire pits, fences, paths, or structures
+- Do NOT change the architecture, paint color, siding, or any part of the building
+- Do NOT add trees or shrubs where none currently exist
+- Do NOT alter the interior of the home in any way
+- Do NOT change or rearrange any existing objects in the scene
+
+This photo will be used to advertise this property to paying guests. Every element in the output MUST physically exist at this property. If something is not clearly visible in the original photo, it MUST NOT appear in the output. When in doubt, leave it unchanged rather than adding anything.
+
+The final image must look like a natural photograph, not AI-generated. Match the lighting, color temperature, and atmosphere of a real June day on the Southern Maine coast.`;
+
+const ISSUE_CATEGORIES = [
+  { id: "added_flowers", label: "Added flowers or landscaping" },
+  { id: "added_objects", label: "Added furniture or objects" },
+  { id: "changed_building", label: "Changed building structure or color" },
+  { id: "wrong_vegetation", label: "Wrong tree/plant species for Maine" },
+  { id: "unrealistic_lighting", label: "Unrealistic lighting or sky" },
+  { id: "ai_artifacts", label: "Visible AI artifacts or distortion" },
+  { id: "incomplete_season", label: "Still looks like winter (grass, trees)" },
+  { id: "interior_modified", label: "Interior was modified" },
+  { id: "other", label: "Other (describe below)" },
+];
+
+const SCORE_LABELS = { 1: "Unusable", 2: "Unusable", 3: "Major issues", 4: "Major issues", 5: "Needs work", 6: "Needs work", 7: "Good with minor issues", 8: "Good with minor issues", 9: "Perfect", 10: "Perfect" };
+
+const state = {
+  sessionId: null, propertyName: "", originalImage: null, originalPreview: null,
+  conversationHistory: [], currentResult: null, responseText: "",
+  editCount: 0, totalCost: 0, submissions: [], lastSubmissionId: null,
+};
+
+// DOM refs
+const $ = (id) => document.getElementById(id);
+const propertyNameEl = $("propertyName"), uploadZone = $("uploadZone"), fileInput = $("fileInput");
+const uploadPreview = $("uploadPreview"), uploadText = $("uploadText"), promptText = $("promptText");
+const generateBtn = $("generateBtn"), errorBox = $("errorBox"), resultsSection = $("resultsSection");
+const originalImg = $("originalImg"), editedImg = $("editedImg"), followUpText = $("followUpText");
+const refineBtn = $("refineBtn"), iterWarning = $("iterWarning"), scoreSlider = $("scoreSlider");
+const scoreLabel = $("scoreLabel"), feedbackText = $("feedbackText"), feedbackMsg = $("feedbackMsg");
+const costTracker = $("costTracker"), zoomModal = $("zoomModal"), zoomImg = $("zoomImg");
+
+// Init
+promptText.value = DEFAULT_PROMPT;
+buildIssueCheckboxes();
+
+function buildIssueCheckboxes() {
+  const container = $("issueChecks");
+  ISSUE_CATEGORIES.forEach((cat) => {
+    const lbl = document.createElement("label");
+    lbl.innerHTML = `<input type="checkbox" value="${cat.id}"> ${cat.label}`;
+    container.appendChild(lbl);
+    if (cat.id === "other") {
+      lbl.querySelector("input").addEventListener("change", (e) => {
+        $("otherTextWrap").classList.toggle("hidden", !e.target.checked);
+      });
+    }
+  });
+}
+
+function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("hidden"); }
+function hideError() { errorBox.classList.add("hidden"); }
+function updateCost() { costTracker.textContent = `This session: ${state.editCount} edit${state.editCount !== 1 ? "s" : ""}, ~$${state.totalCost.toFixed(2)}`; }
+function setLoading(btn, loading, text) {
+  btn.disabled = loading;
+  btn.innerHTML = loading ? `<span class="spinner"></span>${text || "Generating..."}` : (text || btn.dataset.label || "Generate");
+}
+
+// Upload
+uploadZone.addEventListener("click", () => fileInput.click());
+uploadZone.addEventListener("dragover", (e) => { e.preventDefault(); uploadZone.classList.add("dragover"); });
+uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragover"));
+uploadZone.addEventListener("drop", (e) => { e.preventDefault(); uploadZone.classList.remove("dragover"); handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener("change", () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    state.originalPreview = reader.result;
+    uploadPreview.src = reader.result;
+    uploadPreview.classList.remove("hidden");
+    uploadText.textContent = file.name;
+
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    state.originalImage = { data: btoa(bin), mimeType: file.type };
+    generateBtn.disabled = false;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Prompt toggle
+$("promptToggle").addEventListener("click", () => {
+  const section = $("promptSection");
+  section.classList.toggle("collapsed");
+  $("promptToggle").textContent = section.classList.contains("collapsed") ? "▶ Edit Prompt" : "▼ Edit Prompt";
+});
+$("resetPrompt").addEventListener("click", () => { promptText.value = DEFAULT_PROMPT; });
+
+// Generate
+generateBtn.addEventListener("click", async () => {
+  const propName = propertyNameEl.value.trim();
+  if (!propName) { showError("Please enter a property name."); return; }
+  if (!state.originalImage) { showError("Please upload a photo."); return; }
+  hideError();
+  generateBtn.dataset.label = "Generate";
+  setLoading(generateBtn, true, "Generating with Nano Banana Pro...");
+
+  try {
+    const fd = new FormData();
+    const blob = await fetch(`data:${state.originalImage.mimeType};base64,${state.originalImage.data}`).then(r => r.blob());
+    fd.append("image", blob, "photo.jpg");
+    fd.append("prompt", promptText.value);
+    fd.append("property_name", propName);
+    if (state.sessionId) fd.append("session_id", state.sessionId);
+
+    const resp = await fetch(`${WORKER_URL}/api/generate`, { method: "POST", body: fd });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || `Error ${resp.status}`); }
+    const data = await resp.json();
+
+    state.sessionId = data.session_id;
+    state.propertyName = propName;
+    state.currentResult = data.result_image_base64;
+    state.responseText = data.response_text;
+    state.lastSubmissionId = data.submission_id;
+    state.editCount++;
+    state.totalCost += data.cost_estimate;
+    state.submissions.push(data.submission_id);
+
+    // Build conversation history with model parts (includes thought signatures)
+    state.conversationHistory = [
+      { role: "user", parts: [
+        { inlineData: { mimeType: state.originalImage.mimeType, data: state.originalImage.data } },
+        { text: promptText.value },
+      ]},
+      { role: "model", parts: data.model_parts },
+    ];
+
+    showResult();
+    // Collapse prompt after first generation
+    $("promptSection").classList.add("collapsed");
+    $("promptToggle").textContent = "▶ Edit Prompt";
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    setLoading(generateBtn, false, "Generate");
+  }
+});
+
+function showResult() {
+  originalImg.src = state.originalPreview;
+  editedImg.src = `data:image/png;base64,${state.currentResult}`;
+  resultsSection.classList.remove("hidden");
+  iterWarning.classList.toggle("hidden", state.editCount < 4);
+  updateCost();
+  resetFeedback();
+}
+
+// Zoom
+originalImg.addEventListener("click", () => { zoomImg.src = originalImg.src; zoomModal.classList.add("active"); });
+editedImg.addEventListener("click", () => { zoomImg.src = editedImg.src; zoomModal.classList.add("active"); });
+zoomModal.addEventListener("click", () => zoomModal.classList.remove("active"));
+
+// Refine (iterate)
+refineBtn.addEventListener("click", async () => {
+  const text = followUpText.value.trim();
+  if (!text) return;
+  hideError();
+  setLoading(refineBtn, true, "Refining...");
+
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/iterate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: state.sessionId,
+        follow_up_text: text,
+        conversation_history: state.conversationHistory,
+        iteration_number: state.editCount,
+        property_name: state.propertyName,
+      }),
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || `Error ${resp.status}`); }
+    const data = await resp.json();
+
+    state.currentResult = data.result_image_base64;
+    state.responseText = data.response_text;
+    state.lastSubmissionId = data.submission_id;
+    state.editCount++;
+    state.totalCost += data.cost_estimate;
+    state.submissions.push(data.submission_id);
+
+    // Append to conversation history
+    state.conversationHistory.push({ role: "user", parts: [{ text }] });
+    state.conversationHistory.push({ role: "model", parts: data.model_parts });
+
+    followUpText.value = "";
+    showResult();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    setLoading(refineBtn, false, "Refine");
+  }
+});
+
+// Score slider
+scoreSlider.addEventListener("input", () => {
+  const v = parseInt(scoreSlider.value);
+  scoreLabel.textContent = `${v} — ${SCORE_LABELS[v]}`;
+});
+
+// Feedback helpers
+function getSelectedIssues() {
+  const checks = $("issueChecks").querySelectorAll("input:checked");
+  return Array.from(checks).map((c) => c.value);
+}
+
+function resetFeedback() {
+  scoreSlider.value = 5;
+  scoreLabel.textContent = "5 — Needs work";
+  $("issueChecks").querySelectorAll("input").forEach((c) => c.checked = false);
+  $("otherTextWrap").classList.add("hidden");
+  $("otherText").value = "";
+  feedbackText.value = "";
+  feedbackMsg.classList.add("hidden");
+}
+
+async function submitFeedback(willRegen) {
+  const issues = getSelectedIssues();
+  const fbText = feedbackText.value.trim();
+  const otherText = $("otherText").value.trim();
+  const fullText = [fbText, otherText].filter(Boolean).join(". ");
+
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        submission_id: state.lastSubmissionId,
+        session_id: state.sessionId,
+        score: parseInt(scoreSlider.value),
+        feedback_text: fullText,
+        issues_detected: issues,
+        will_resubmit: willRegen,
+      }),
+    });
+    if (!resp.ok) throw new Error("Failed to submit feedback");
+    return fullText;
+  } catch (err) {
+    showError("Failed to submit feedback: " + err.message);
+    return null;
+  }
+}
+
+$("submitFeedbackBtn").addEventListener("click", async () => {
+  const result = await submitFeedback(false);
+  if (result !== null) {
+    feedbackMsg.textContent = "Feedback submitted. Thank you!";
+    feedbackMsg.classList.remove("hidden");
+  }
+});
+
+$("submitRegenBtn").addEventListener("click", async () => {
+  const fullText = await submitFeedback(true);
+  if (fullText === null) return;
+  // Use feedback as follow-up prompt
+  const followUp = fullText || feedbackText.value.trim() || "Please fix the issues I noted";
+  followUpText.value = followUp;
+  refineBtn.click();
+});
+
+// Download
+$("downloadBtn").addEventListener("click", () => {
+  if (!state.currentResult) return;
+  const a = document.createElement("a");
+  a.href = `data:image/png;base64,${state.currentResult}`;
+  a.download = `${state.propertyName.replace(/[^a-zA-Z0-9]/g, "_")}_summer.png`;
+  a.click();
+});
+
+// New photo
+$("newPhotoBtn").addEventListener("click", () => {
+  Object.assign(state, {
+    sessionId: null, propertyName: "", originalImage: null, originalPreview: null,
+    conversationHistory: [], currentResult: null, responseText: "",
+    editCount: 0, totalCost: 0, submissions: [], lastSubmissionId: null,
+  });
+  propertyNameEl.value = "";
+  uploadPreview.classList.add("hidden");
+  uploadPreview.src = "";
+  uploadText.textContent = "Drag & drop a photo here, or click to upload";
+  fileInput.value = "";
+  generateBtn.disabled = true;
+  resultsSection.classList.add("hidden");
+  hideError();
+  promptText.value = DEFAULT_PROMPT;
+  $("promptSection").classList.remove("collapsed");
+  $("promptToggle").textContent = "▼ Edit Prompt";
+});
+</script>
+</body>
+</html>
