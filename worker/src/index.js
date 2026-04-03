@@ -1,7 +1,7 @@
 const GEMINI_MODEL = "gemini-3-pro-image-preview";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const COST_PER_IMAGE = 0.134;
-const ALLOWED_ORIGIN = "https://PMTinkerer.github.io";
+const ALLOWED_ORIGIN = "https://pmtinkerer.github.io";
 
 function corsHeaders(request, env) {
   const origin = request.headers.get("Origin") || "";
