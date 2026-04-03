@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GW Photo Editor — Admin</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8f9fa; color: #212529; line-height: 1.5; padding: 16px; max-width: 960px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin-bottom: 16px; }
+h2 { font-size: 1.1rem; margin: 20px 0 8px; border-bottom: 1px solid #dee2e6; padding-bottom: 4px; }
+.login { max-width: 320px; margin: 80px auto; text-align: center; }
+.login input { width: 100%; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px; margin-bottom: 8px; }
+.btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+.btn-primary { background: #0d6efd; color: white; }
+.btn-green { background: #198754; color: white; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; text-align: center; }
+.stat .num { font-size: 1.6rem; font-weight: 700; }
+.stat .lbl { font-size: 0.8rem; color: #6c757d; }
+table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.85rem; }
+th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #eee; }
+th { background: #f1f3f5; font-weight: 600; }
+.bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 100px; margin: 8px 0 16px; }
+.bar { background: #0d6efd; border-radius: 2px 2px 0 0; min-width: 24px; text-align: center; position: relative; }
+.bar .count { position: absolute; top: -16px; width: 100%; font-size: 0.7rem; color: #6c757d; }
+.bar .label { font-size: 0.7rem; color: #6c757d; margin-top: 2px; }
+.error { background: #f8d7da; border: 1px solid #f5c2c7; border-radius: 4px; padding: 10px; color: #842029; margin-bottom: 12px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="login">
+  <h1>Admin Dashboard</h1>
+  <input type="password" id="passwordInput" placeholder="Admin password">
+  <button class="btn btn-primary" id="loginBtn">Sign In</button>
+  <div id="loginError" class="error hidden"></div>
+</div>
+
+<div id="dashboard" class="hidden">
+  <h1>GW Photo Editor — Admin</h1>
+
+  <div class="stats" id="statsGrid"></div>
+
+  <h2>Score Distribution</h2>
+  <div class="bar-chart" id="scoreChart"></div>
+
+  <h2>Common Issues</h2>
+  <table id="issuesTable"><thead><tr><th>Issue</th><th>Count</th></tr></thead><tbody></tbody></table>
+
+  <h2>Recent Sessions</h2>
+  <table id="sessionsTable"><thead><tr><th>Property</th><th>Date</th><th>Edits</th><th>Avg Score</th><th>Cost</th></tr></thead><tbody></tbody></table>
+
+  <h2>Prompt Versions</h2>
+  <table id="promptsTable"><thead><tr><th>Version</th><th>Active</th><th>Uses</th><th>Avg Score</th><th>Notes</th></tr></thead><tbody></tbody></table>
+
+  <h2>Export</h2>
+  <button class="btn btn-green" id="exportBtn">Download Raw Data (JSONL)</button>
+</div>
+
+<script>
+const WORKER_URL = "https://gw-photo-editor-api.PMTinkerer.workers.dev";
+let token = sessionStorage.getItem("admin_token") || "";
+
+const $ = (id) => document.getElementById(id);
+
+if (token) loadDashboard();
+
+$("loginBtn").addEventListener("click", () => {
+  token = $("passwordInput").value;
+  sessionStorage.setItem("admin_token", token);
+  loadDashboard();
+});
+$("passwordInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
+
+async function apiFetch(path) {
+  const resp = await fetch(`${WORKER_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (resp.status === 401) {
+    sessionStorage.removeItem("admin_token");
+    $("loginError").textContent = "Invalid password";
+    $("loginError").classList.remove("hidden");
+    $("loginScreen").classList.remove("hidden");
+    $("dashboard").classList.add("hidden");
+    throw new Error("Unauthorized");
+  }
+  if (!resp.ok) throw new Error(`Error ${resp.status}`);
+  return resp.json();
+}
+
+async function loadDashboard() {
+  try {
+    const data = await apiFetch("/api/admin/dashboard");
+    $("loginScreen").classList.add("hidden");
+    $("dashboard").classList.remove("hidden");
+    renderStats(data);
+    renderScoreChart(data.score_distribution);
+    renderIssues(data.common_issues);
+    renderSessions(data.recent_sessions);
+    renderPrompts(data.prompt_versions);
+  } catch (err) {
+    if (err.message !== "Unauthorized") {
+      $("loginError").textContent = err.message;
+      $("loginError").classList.remove("hidden");
+    }
+  }
+}
+
+function renderStats(data) {
+  const items = [
+    { num: data.total_sessions, lbl: "Sessions" },
+    { num: data.total_submissions, lbl: "Submissions" },
+    { num: `$${data.total_cost.toFixed(2)}`, lbl: "Total Cost" },
+    { num: data.avg_score ?? "—", lbl: "Avg Score" },
+    { num: data.submissions_today, lbl: "Today" },
+  ];
+  $("statsGrid").innerHTML = items.map((i) =>
+    `<div class="stat"><div class="num">${i.num}</div><div class="lbl">${i.lbl}</div></div>`
+  ).join("");
+}
+
+function renderScoreChart(dist) {
+  const max = Math.max(...Object.values(dist), 1);
+  $("scoreChart").innerHTML = Object.entries(dist).map(([score, count]) => {
+    const h = Math.max((count / max) * 80, 2);
+    return `<div style="text-align:center"><div class="bar" style="height:${h}px"><span class="count">${count}</span></div><div class="label">${score}</div></div>`;
+  }).join("");
+}
+
+function renderIssues(issues) {
+  const tbody = $("issuesTable").querySelector("tbody");
+  tbody.innerHTML = issues.length
+    ? issues.map((i) => `<tr><td>${i.issue}</td><td>${i.count}</td></tr>`).join("")
+    : "<tr><td colspan='2'>No issues reported yet</td></tr>";
+}
+
+function renderSessions(sessions) {
+  const tbody = $("sessionsTable").querySelector("tbody");
+  tbody.innerHTML = sessions.length
+    ? sessions.map((s) => `<tr><td>${s.property_name}</td><td>${s.first_date?.slice(0, 10) || "—"}</td><td>${s.iterations}</td><td>${s.avg_score ?? "—"}</td><td>$${(s.cost || 0).toFixed(2)}</td></tr>`).join("")
+    : "<tr><td colspan='5'>No sessions yet</td></tr>";
+}
+
+function renderPrompts(versions) {
+  const tbody = $("promptsTable").querySelector("tbody");
+  tbody.innerHTML = versions.length
+    ? versions.map((v) => `<tr><td>v${v.version}</td><td>${v.is_active ? "✓" : ""}</td><td>${v.total_uses}</td><td>${v.avg_score ?? "—"}</td><td>${v.change_notes || ""}</td></tr>`).join("")
+    : "<tr><td colspan='5'>No prompt versions</td></tr>";
+}
+
+$("exportBtn").addEventListener("click", async () => {
+  try {
+    const data = await apiFetch("/api/admin/export");
+    const lines = [
+      "# submissions",
+      ...data.submissions.map((s) => JSON.stringify(s)),
+      "",
+      "# feedback",
+      ...data.feedback.map((f) => JSON.stringify(f)),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `gw-photo-editor-export-${new Date().toISOString().slice(0, 10)}.jsonl`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    alert("Export failed: " + err.message);
+  }
+});
+</script>
+</body>
+</html>
