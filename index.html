@@ -169,22 +169,27 @@ const WORKER_URL = "https://gw-photo-editor-api.gwphoto.workers.dev";
 
 const DEFAULT_PROMPT = `This is a vacation rental listing photo taken in Southern Coastal Maine. Transform it to look like it was photographed in mid-June in this same region.
 
+MOST IMPORTANT RULE — TREE COUNT MUST BE IDENTICAL:
+Count every tree trunk visible in the original photo. The output MUST have the EXACT same number of tree trunks in the EXACT same positions. You may ONLY add leaves/canopy to trunks that are already visible. If an area has no tree trunk in the original, there must be no tree in the output. Adding even one tree that does not exist in the original is a critical failure.
+
 SEASONAL CHANGES ONLY — apply these transformations to elements ALREADY VISIBLE in the photo:
-- Bare/dormant trees → full green canopy with species typical to coastal Maine (oaks, maples, birches, white pines)
+- Bare/dormant trees that have VISIBLE TRUNKS → add green canopy with species typical to coastal Maine (oaks, maples, birches, white pines). Do NOT add new trunks or trees.
 - Brown/dead/snow-covered grass → healthy green lawn
 - Snow on surfaces → remove it, show the surface underneath as it would naturally appear
 - Overcast winter light → warm, natural New England summer daylight
 - Bare garden beds that are CLEARLY ALREADY PRESENT → green them up with low ground cover only
 
 CRITICAL — DO NOT ADD, GENERATE, OR INVENT ANY OF THE FOLLOWING:
+- Do NOT add ANY new trees, shrubs, or bushes where none currently exist. This is the #1 most common mistake. If you cannot see a trunk in the original, do not place a tree there.
 - Do NOT add flowers, flower beds, planters, or landscaping that is not already present
 - Do NOT add furniture, decor, rugs, cushions, or staging items
 - Do NOT add people, pets, boats, vehicles, or any objects
 - Do NOT add water features, fire pits, fences, paths, or structures
 - Do NOT change the architecture, paint color, siding, or any part of the building
-- Do NOT add trees or shrubs where none currently exist
 - Do NOT alter the interior of the home in any way
 - Do NOT change or rearrange any existing objects in the scene
+
+VERIFICATION: Before finalizing, compare your output against the original. Check that no new trees appear in any area that was previously open sky, open ground, or a clear sightline. Every tree in the output must correspond to a visible trunk in the original.
 
 This photo will be used to advertise this property to paying guests. Every element in the output MUST physically exist at this property. If something is not clearly visible in the original photo, it MUST NOT appear in the output. When in doubt, leave it unchanged rather than adding anything.
 
