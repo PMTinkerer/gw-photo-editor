@@ -1,5 +1,5 @@
 const GEMINI_MODEL = "gemini-3-pro-image-preview";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent`;
 const COST_PER_IMAGE = 0.134;
 const ALLOWED_ORIGIN = "https://pmtinkerer.github.io";
 
@@ -168,24 +168,31 @@ async function callGemini(env, contents, useGrounding = false) {
     },
   };
   if (useGrounding) body.tools = [{ googleSearch: {} }];
-  const resp = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}`, {
+  const resp = await fetch(`${GEMINI_URL}?key=${env.GEMINI_API_KEY}&alt=sse`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!resp.ok) throw { status: resp.status, body: await resp.text() };
 
-  const parts = (await resp.json()).candidates?.[0]?.content?.parts;
-  if (!parts) throw { status: 500, body: "No content in Gemini response" };
-
+  const raw = await resp.text();
   let responseText = "";
   let resultImageBase64 = null;
   const modelParts = [];
-  for (const p of parts) {
-    if (p.text) { responseText += p.text; modelParts.push({ text: p.text }); }
-    if (p.inlineData) { resultImageBase64 = p.inlineData.data; modelParts.push({ inlineData: p.inlineData }); }
-    if (p.thoughtSignature) modelParts.push({ thoughtSignature: p.thoughtSignature });
+
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    try {
+      const parts = JSON.parse(line.slice(6)).candidates?.[0]?.content?.parts;
+      if (!parts) continue;
+      for (const p of parts) {
+        if (p.text) { responseText += p.text; modelParts.push({ text: p.text }); }
+        if (p.inlineData) { resultImageBase64 = p.inlineData.data; modelParts.push({ inlineData: p.inlineData }); }
+        if (p.thoughtSignature) modelParts.push({ thoughtSignature: p.thoughtSignature });
+      }
+    } catch { /* skip malformed events */ }
   }
+
   if (!resultImageBase64) throw { status: 502, body: "Gemini did not return an image. " + responseText };
   return { responseText, resultImageBase64, modelParts, durationMs: Date.now() - start };
 }
