@@ -6,7 +6,7 @@ const ALLOWED_ORIGIN = "https://pmtinkerer.github.io";
 function corsHeaders(request, env) {
   const origin = request.headers.get("Origin") || "";
   const allowed = [ALLOWED_ORIGIN];
-  if (env?.ENVIRONMENT === "development") allowed.push("http://localhost:8787");
+  if (env?.ENVIRONMENT === "development" || origin.startsWith("http://localhost:")) allowed.push(origin);
   if (!allowed.includes(origin)) return null;
   return {
     "Access-Control-Allow-Origin": origin,
@@ -17,17 +17,86 @@ function corsHeaders(request, env) {
   };
 }
 
-function json(data, status, cors) {
-  return new Response(JSON.stringify(data), {
+function requestMeta(request) {
+  const url = new URL(request.url);
+  return {
+    requestId: crypto.randomUUID().slice(0, 12),
+    method: request.method,
+    path: url.pathname,
+    origin: request.headers.get("Origin") || "",
+    contentLength: request.headers.get("Content-Length") || null,
+    cfRay: request.headers.get("cf-ray") || null,
+    startTime: Date.now(),
+  };
+}
+
+function requestDuration(meta) {
+  return Date.now() - meta.startTime;
+}
+
+function logEvent(level, event, meta, extra = {}) {
+  const payload = {
+    event,
+    request_id: meta.requestId,
+    method: meta.method,
+    path: meta.path,
+    origin: meta.origin || null,
+    cf_ray: meta.cfRay,
+    ...extra,
+  };
+  const logger = console[level] || console.log;
+  logger(JSON.stringify(payload));
+}
+
+function finalizePayload(data, meta) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  return {
+    ...data,
+    request_id: data.request_id || meta.requestId,
+  };
+}
+
+function json(data, status, cors, meta) {
+  const durationMs = requestDuration(meta);
+  return new Response(JSON.stringify(finalizePayload(data, meta)), {
     status,
-    headers: { "Content-Type": "application/json", ...cors },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Request-Id": meta.requestId,
+      "X-Worker-Duration-Ms": String(durationMs),
+      ...cors,
+    },
   });
+}
+
+function text(body, status, headers, meta) {
+  const durationMs = requestDuration(meta);
+  return new Response(body, {
+    status,
+    headers: {
+      "X-Request-Id": meta.requestId,
+      "X-Worker-Duration-Ms": String(durationMs),
+      ...headers,
+    },
+  });
+}
+
+function respondJson(data, status, cors, meta, logExtra = {}) {
+  logEvent(status >= 500 ? "error" : status >= 400 ? "warn" : "log", "request_complete", meta, {
+    status,
+    duration_ms: requestDuration(meta),
+    ...logExtra,
+  });
+  return json(data, status, cors, meta);
 }
 
 function bufToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
   let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, bytes.length)));
+  }
   return btoa(bin);
 }
 
@@ -132,11 +201,17 @@ function makeSubLog(id, sessionId, propName, iterNum, prompt, followUp, gemini) 
   };
 }
 
-async function handleGenerate(request, env, ctx) {
+async function handleGenerate(request, env, ctx, meta) {
   const fd = await request.formData();
   const image = fd.get("image"), prompt = fd.get("prompt") || "", propertyName = fd.get("property_name");
   const sessionId = fd.get("session_id") || crypto.randomUUID();
   if (!image || !propertyName) return { error: "image and property_name required", status: 400 };
+  logEvent("log", "generate_received", meta, {
+    upload_mime: image.type || "image/jpeg",
+    upload_bytes: image.size || null,
+    prompt_chars: String(prompt).length,
+    has_existing_session: Boolean(fd.get("session_id")),
+  });
 
   const gemini = await callGemini(env, [{
     role: "user",
@@ -155,11 +230,16 @@ async function handleGenerate(request, env, ctx) {
   };
 }
 
-async function handleIterate(request, env, ctx) {
+async function handleIterate(request, env, ctx, meta) {
   const { session_id, follow_up_text, current_image, current_mime_type, iteration_number, property_name } = await request.json();
   if (!session_id || !follow_up_text || !current_image) {
     return { error: "session_id, follow_up_text, and current_image required", status: 400 };
   }
+  logEvent("log", "iterate_received", meta, {
+    iteration_number: iteration_number || 1,
+    follow_up_chars: String(follow_up_text).length,
+    current_image_chars: String(current_image).length,
+  });
   const gemini = await callGemini(env, [{
     role: "user",
     parts: [
@@ -230,37 +310,59 @@ async function handleExport(env) {
 
 export default {
   async fetch(request, env, ctx) {
+    const meta = requestMeta(request);
     const cors = corsHeaders(request, env);
-    if (!cors) return new Response("Forbidden", { status: 403 });
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+    if (!cors) {
+      logEvent("warn", "cors_rejected", meta, { status: 403 });
+      return text("Forbidden", 403, {}, meta);
+    }
+    if (request.method === "OPTIONS") {
+      logEvent("log", "preflight", meta, { status: 204 });
+      return text(null, 204, cors, meta);
+    }
 
     const path = new URL(request.url).pathname;
+    logEvent("log", "request_start", meta, {
+      content_length: meta.contentLength,
+      is_admin_route: path.startsWith("/api/admin/"),
+    });
     try {
       if (path.startsWith("/api/admin/")) {
-        if (request.headers.get("Authorization") !== `Bearer ${env.ADMIN_PASSWORD}`) return json({ error: "Unauthorized" }, 401, cors);
+        if (request.headers.get("Authorization") !== `Bearer ${env.ADMIN_PASSWORD}`) {
+          return respondJson({ error: "Unauthorized" }, 401, cors, meta);
+        }
         let result;
         if (path === "/api/admin/dashboard") result = await handleDashboard(env);
         else if (path === "/api/admin/export") result = await handleExport(env);
-        else return json({ error: "Not found" }, 404, cors);
-        return json(result.data, result.status, cors);
+        else return respondJson({ error: "Not found" }, 404, cors, meta);
+        return respondJson(result.data, result.status, cors, meta);
       }
 
       let result;
-      if (path === "/api/generate" && request.method === "POST") result = await handleGenerate(request, env, ctx);
-      else if (path === "/api/iterate" && request.method === "POST") result = await handleIterate(request, env, ctx);
+      if (path === "/api/generate" && request.method === "POST") result = await handleGenerate(request, env, ctx, meta);
+      else if (path === "/api/iterate" && request.method === "POST") result = await handleIterate(request, env, ctx, meta);
       else if (path === "/api/feedback" && request.method === "POST") result = await handleFeedback(request, env, ctx);
-      else return json({ error: "Not found" }, 404, cors);
+      else return respondJson({ error: "Not found" }, 404, cors, meta);
 
-      if (result.error) return json({ error: result.error }, result.status, cors);
-      return json(result.data, result.status, cors);
+      if (result.error) return respondJson({ error: result.error }, result.status, cors, meta);
+      return respondJson(result.data, result.status, cors, meta);
     } catch (err) {
       if (err.status && err.body) {
         console.error("Upstream error:", err.status, err.body);
         const hint = err.status === 429 ? " (rate limited — wait a moment)" : err.status === 400 ? " (bad request — try New Photo)" : "";
-        return json({ error: `upstream_error (${err.status})${hint}` }, 502, cors);
+        logEvent("error", "upstream_error", meta, {
+          upstream_status: err.status,
+          duration_ms: requestDuration(meta),
+        });
+        return respondJson({ error: `upstream_error (${err.status})${hint}` }, 502, cors, meta);
       }
       console.error("Worker error:", err);
-      return json({ error: "internal_error" }, 500, cors);
+      logEvent("error", "worker_error", meta, {
+        duration_ms: requestDuration(meta),
+        error_name: err?.name || null,
+        error_message: err?.message || String(err),
+      });
+      return respondJson({ error: "internal_error" }, 500, cors, meta);
     }
   },
 };
