@@ -185,7 +185,9 @@ textarea { resize: vertical; min-height: 80px; }
 </div>
 
 <script>
-const WORKER_URL = "https://gw-photo-editor-api.gwphoto.workers.dev";
+const WORKER_URL = location.hostname === "localhost" || location.protocol === "file:"
+  ? "http://localhost:8787"
+  : "https://gw-photo-editor-api.gwphoto.workers.dev";
 
 const DEFAULT_PROMPT = `This is a vacation rental listing photo taken in Southern Coastal Maine. Transform it to look like it was photographed in mid-June in this same region.
 
@@ -228,10 +230,13 @@ const ISSUE_CATEGORIES = [
 ];
 
 const SCORE_LABELS = { 1: "Unusable", 2: "Unusable", 3: "Major issues", 4: "Major issues", 5: "Needs work", 6: "Needs work", 7: "Good with minor issues", 8: "Good with minor issues", 9: "Perfect", 10: "Perfect" };
+const MAX_UPLOAD_DIMENSION = 2048;
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const JPEG_UPLOAD_QUALITY = 0.88;
 
 const state = {
   sessionId: null, propertyName: "", originalImage: null, originalPreview: null,
-  conversationHistory: [], currentResult: null, responseText: "",
+  currentResult: null, responseText: "",
   editCount: 0, totalCost: 0, lastSubmissionId: null,
 };
 
@@ -270,6 +275,75 @@ function setLoading(btn, loading, text) {
   btn.disabled = loading;
   btn.innerHTML = loading ? `<span class="spinner"></span>${text || "Generating..."}` : (text || btn.dataset.label || "Generate");
 }
+function revokeOriginalPreview() {
+  if (state.originalPreview?.startsWith("blob:")) URL.revokeObjectURL(state.originalPreview);
+  state.originalPreview = null;
+}
+function formatFetchError(err, action) {
+  if (err instanceof TypeError && err.message === "Failed to fetch") {
+    return `${action} could not reach the photo service. Please try again. If it keeps happening, re-upload a smaller image or refresh the page.`;
+  }
+  return err?.message || `${action} failed.`;
+}
+function attachRequestId(message, requestId) {
+  return requestId ? `${message} Reference: ${requestId}` : message;
+}
+async function readApiError(resp) {
+  const payload = await resp.json().catch(() => ({}));
+  const requestId = payload.request_id || resp.headers.get("X-Request-Id");
+  const message = payload.detail || payload.error || `Error ${resp.status}`;
+  return attachRequestId(message, requestId);
+}
+async function loadImageElement(file) {
+  if ("createImageBitmap" in window) return createImageBitmap(file);
+  const tempUrl = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error("This image file could not be opened in the browser."));
+      img.src = tempUrl;
+    });
+    return img;
+  } finally {
+    URL.revokeObjectURL(tempUrl);
+  }
+}
+async function normalizeUploadImage(file) {
+  const source = await loadImageElement(file);
+  try {
+    const sourceWidth = source.width;
+    const sourceHeight = source.height;
+    const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(sourceWidth, sourceHeight));
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+    const needsResize = scale < 1;
+    const needsCompression = file.size > MAX_UPLOAD_BYTES || !/^image\/(jpeg|jpg)$/i.test(file.type);
+
+    if (!needsResize && !needsCompression) return file;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return file;
+    ctx.drawImage(source, 0, 0, targetWidth, targetHeight);
+
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", JPEG_UPLOAD_QUALITY);
+    });
+    if (!blob) return file;
+
+    const normalizedName = file.name.replace(/\.[^.]+$/, "") || "photo";
+    return new File([blob], `${normalizedName}.jpg`, {
+      type: "image/jpeg",
+      lastModified: file.lastModified,
+    });
+  } finally {
+    if (typeof source.close === "function") source.close();
+  }
+}
 
 // Upload
 uploadZone.addEventListener("click", () => fileInput.click());
@@ -278,23 +352,29 @@ uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("drag
 uploadZone.addEventListener("drop", (e) => { e.preventDefault(); uploadZone.classList.remove("dragover"); handleFile(e.dataTransfer.files[0]); });
 fileInput.addEventListener("change", () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
-function handleFile(file) {
+async function handleFile(file) {
   if (!file || !file.type.startsWith("image/")) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    state.originalPreview = reader.result;
-    uploadPreview.src = reader.result;
-    uploadPreview.classList.remove("hidden");
-    uploadText.textContent = file.name;
+  hideError();
+  generateBtn.disabled = true;
+  uploadText.textContent = "Preparing image...";
 
-    const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let bin = "";
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    state.originalImage = { data: btoa(bin), mimeType: file.type };
+  revokeOriginalPreview();
+  state.originalPreview = URL.createObjectURL(file);
+  uploadPreview.src = state.originalPreview;
+  uploadPreview.classList.remove("hidden");
+
+  try {
+    state.originalImage = await normalizeUploadImage(file);
+    uploadText.textContent = state.originalImage === file ? file.name : `${file.name} (optimized for upload)`;
     generateBtn.disabled = false;
-  };
-  reader.readAsDataURL(file);
+  } catch (err) {
+    state.originalImage = null;
+    uploadText.textContent = "Drag & drop a photo here, or click to upload";
+    uploadPreview.classList.add("hidden");
+    uploadPreview.src = "";
+    revokeOriginalPreview();
+    showError(formatFetchError(err, "Preparing the image"));
+  }
 }
 
 // Prompt toggle
@@ -316,14 +396,13 @@ generateBtn.addEventListener("click", async () => {
 
   try {
     const fd = new FormData();
-    const blob = await fetch(`data:${state.originalImage.mimeType};base64,${state.originalImage.data}`).then(r => r.blob());
-    fd.append("image", blob, "photo.jpg");
+    fd.append("image", state.originalImage, state.originalImage.name || "photo.jpg");
     fd.append("prompt", promptText.value);
     fd.append("property_name", propName);
     if (state.sessionId) fd.append("session_id", state.sessionId);
 
     const resp = await fetch(`${WORKER_URL}/api/generate`, { method: "POST", body: fd });
-    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || `Error ${resp.status}`); }
+    if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
 
     state.sessionId = data.session_id;
@@ -334,21 +413,12 @@ generateBtn.addEventListener("click", async () => {
     state.editCount++;
     state.totalCost += data.cost_estimate;
 
-    // Build conversation history with model parts (includes thought signatures)
-    state.conversationHistory = [
-      { role: "user", parts: [
-        { inlineData: { mimeType: state.originalImage.mimeType, data: state.originalImage.data } },
-        { text: promptText.value },
-      ]},
-      { role: "model", parts: data.model_parts },
-    ];
-
     showResult();
     // Collapse prompt after first generation
     $("promptSection").classList.add("collapsed");
     $("promptToggle").textContent = "▶ Edit Prompt";
   } catch (err) {
-    showError(err.message);
+    showError(formatFetchError(err, "Generating the image"));
   } finally {
     setLoading(generateBtn, false, "Generate");
   }
@@ -556,7 +626,7 @@ refineBtn.addEventListener("click", async () => {
         property_name: state.propertyName,
       }),
     });
-    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || e.error || `Error ${resp.status}`); }
+    if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
 
     state.currentResult = data.result_image_base64;
@@ -566,7 +636,7 @@ refineBtn.addEventListener("click", async () => {
     state.totalCost += data.cost_estimate;
     showResult();
   } catch (err) {
-    showError(err.message);
+    showError(formatFetchError(err, "Refining the image"));
   } finally {
     setLoading(refineBtn, false, "Refine");
   }
@@ -583,9 +653,10 @@ $("downloadBtn").addEventListener("click", () => {
 
 // New photo
 $("newPhotoBtn").addEventListener("click", () => {
+  revokeOriginalPreview();
   Object.assign(state, {
     sessionId: null, propertyName: "", originalImage: null, originalPreview: null,
-    conversationHistory: [], currentResult: null, responseText: "",
+    currentResult: null, responseText: "",
     editCount: 0, totalCost: 0, lastSubmissionId: null,
   });
   propertyNameEl.value = "";
