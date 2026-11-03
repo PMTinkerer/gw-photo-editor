@@ -236,8 +236,14 @@ export default {
 
     const path = new URL(request.url).pathname;
     try {
-      if (path.startsWith("/api/admin/")) {
-        if (request.headers.get("Authorization") !== `Bearer ${env.ADMIN_PASSWORD}`) return json({ error: "Unauthorized" }, 401, cors);
+      const adminRoute = path.startsWith("/api/admin/");
+      const editorWrite = request.method === "POST" && ["/api/generate", "/api/iterate", "/api/feedback"].includes(path);
+      if (adminRoute || editorWrite) {
+        if (!env.ADMIN_PASSWORD || request.headers.get("Authorization") !== `Bearer ${env.ADMIN_PASSWORD}`) {
+          return json({ error: "Unauthorized" }, 401, cors);
+        }
+      }
+      if (adminRoute) {
         let result;
         if (path === "/api/admin/dashboard") result = await handleDashboard(env);
         else if (path === "/api/admin/export") result = await handleExport(env);
