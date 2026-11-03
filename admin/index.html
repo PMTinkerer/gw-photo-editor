@@ -114,7 +114,7 @@ function renderStats(data) {
     { num: data.submissions_today, lbl: "Today" },
   ];
   $("statsGrid").innerHTML = items.map((i) =>
-    `<div class="stat"><div class="num">${i.num}</div><div class="lbl">${i.lbl}</div></div>`
+    `<div class="stat"><div class="num">${esc(i.num)}</div><div class="lbl">${i.lbl}</div></div>`
   ).join("");
 }
 
@@ -122,21 +122,21 @@ function renderScoreChart(dist) {
   const max = Math.max(...Object.values(dist), 1);
   $("scoreChart").innerHTML = Object.entries(dist).map(([score, count]) => {
     const h = Math.max((count / max) * 80, 2);
-    return `<div style="text-align:center"><div class="bar" style="height:${h}px"><span class="count">${count}</span></div><div class="label">${score}</div></div>`;
+    return `<div style="text-align:center"><div class="bar" style="height:${h}px"><span class="count">${esc(count)}</span></div><div class="label">${esc(score)}</div></div>`;
   }).join("");
 }
 
 function renderIssues(issues) {
   const tbody = $("issuesTable").querySelector("tbody");
   tbody.innerHTML = issues.length
-    ? issues.map((i) => `<tr><td>${esc(i.issue)}</td><td>${i.count}</td></tr>`).join("")
+    ? issues.map((i) => `<tr><td>${esc(i.issue)}</td><td>${esc(i.count)}</td></tr>`).join("")
     : "<tr><td colspan='2'>No issues reported yet</td></tr>";
 }
 
 function renderSessions(sessions) {
   const tbody = $("sessionsTable").querySelector("tbody");
   tbody.innerHTML = sessions.length
-    ? sessions.map((s) => `<tr><td>${esc(s.property_name)}</td><td>${esc(s.first_date?.slice(0, 10) || "—")}</td><td>${s.iterations}</td><td>${s.avg_score ?? "—"}</td><td>$${(s.cost || 0).toFixed(2)}</td></tr>`).join("")
+    ? sessions.map((s) => `<tr><td>${esc(s.property_name)}</td><td>${esc(s.first_date?.slice(0, 10) || "—")}</td><td>${esc(s.iterations)}</td><td>${esc(s.avg_score ?? "—")}</td><td>$${(s.cost || 0).toFixed(2)}</td></tr>`).join("")
     : "<tr><td colspan='5'>No sessions yet</td></tr>";
 }
 
