@@ -178,9 +178,19 @@ async function handleIterate(request, env, ctx) {
   };
 }
 
+function validScore(score) {
+  return Number.isInteger(score) && score >= 1 && score <= 10;
+}
+
 async function handleFeedback(request, env, ctx) {
   const { submission_id, session_id, score, feedback_text, issues_detected, will_resubmit } = await request.json();
-  if (!submission_id || !session_id) return { error: "submission_id and session_id required", status: 400 };
+  if (typeof submission_id !== "string" || !submission_id || typeof session_id !== "string" || !session_id) {
+    return { error: "submission_id and session_id required", status: 400 };
+  }
+  if (score != null && !validScore(score)) return { error: "score must be an integer from 1 to 10", status: 400 };
+  if (issues_detected != null && (!Array.isArray(issues_detected) || !issues_detected.every(i => typeof i === "string"))) {
+    return { error: "issues_detected must be a list of strings", status: 400 };
+  }
   const id = `fb_${crypto.randomUUID().slice(0, 12)}`;
   ctx.waitUntil(appendToLog(env, "feedback.jsonl", {
     id, submission_id, session_id, created_at: new Date().toISOString(),
@@ -193,19 +203,25 @@ async function handleFeedback(request, env, ctx) {
 async function handleDashboard(env) {
   const [subs, fb] = await Promise.all([readJsonl(env, "submissions.jsonl"), readJsonl(env, "feedback.jsonl")]);
   const today = new Date().toISOString().slice(0, 10);
-  const scores = fb.filter((f) => f.score).map((f) => f.score);
+  const scores = fb.map((f) => f.score).filter(validScore);
   const scoreDist = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 1, 0]));
   scores.forEach((s) => scoreDist[s]++);
 
-  const issueCounts = {};
-  fb.forEach((f) => (f.issues_detected || []).forEach((i) => { issueCounts[i] = (issueCounts[i] || 0) + 1; }));
+  const issueCounts = Object.create(null);
+  for (const f of fb) {
+    if (!Array.isArray(f.issues_detected)) continue;
+    for (const issue of f.issues_detected) {
+      if (typeof issue === "string") issueCounts[issue] = (issueCounts[issue] || 0) + 1;
+    }
+  }
 
-  const sessMap = {};
+  const sessMap = Object.create(null);
   subs.forEach((s) => {
-    const se = sessMap[s.session_id] ||= { session_id: s.session_id, property_name: s.property_name, first_date: s.created_at, iterations: 0, cost: 0, _scores: [] };
+    if (typeof s.session_id !== "string") return;
+    const se = sessMap[s.session_id] ||= { session_id: s.session_id, property_name: typeof s.property_name === "string" ? s.property_name : "", first_date: s.created_at, iterations: 0, cost: 0, _scores: [] };
     se.iterations++; se.cost += s.cost_estimate || 0;
   });
-  fb.forEach((f) => { if (f.score && sessMap[f.session_id]) sessMap[f.session_id]._scores.push(f.score); });
+  fb.forEach((f) => { if (validScore(f.score) && typeof f.session_id === "string" && sessMap[f.session_id]) sessMap[f.session_id]._scores.push(f.score); });
   const recent = Object.values(sessMap).sort((a, b) => b.first_date.localeCompare(a.first_date)).slice(0, 20);
   recent.forEach((s) => { s.avg_score = s._scores.length ? +(s._scores.reduce((a, b) => a + b, 0) / s._scores.length).toFixed(1) : null; delete s._scores; });
 
